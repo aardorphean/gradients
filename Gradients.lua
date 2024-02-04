@@ -7,7 +7,7 @@ local Gradient = dofile(GetInfo(60) .. "gradlib.lua")
 local utils = require("utils")
 local sqlite3 = require("sqlite3")
 
-local VERSION = "1.0"
+local VERSION = "1.1"
 
 ----------------------------------------------------------
 
@@ -56,6 +56,13 @@ local helpFiles = {
 
 Passing in a topic will pull up the help file for that specific command for
 more detailed help.]],
+    },
+    Names = {
+      command = "grad names",
+      summary = "List all gradient names",
+      body = [[Shows a list of all gradient names.
+
+Primarily a troubleshooting and support command.]]
     }
   },
   Use = {
@@ -215,7 +222,7 @@ editing of colors.  All the links have tool tips and it should be fairly
 self explanatory.]]
     },
     Gradient = {
-      command = "grad gradient <subcommand> <arguemtns>",
+      command = "grad gradient <subcommand> <arguments>",
       summary = "Creates and deletes gradients.",
       body = [[You may never use this command directly since the user interface will
 call it for you. But this is the command to create and delete existing
@@ -1089,6 +1096,7 @@ local function getGradients()
       table.insert(colors, Colr:new(c))
     end, "|")
 
+
     if row["name"] and #row["name"] ~= 0 then
       table.insert(gradients, {
         name = row["name"],
@@ -1561,6 +1569,18 @@ local function gradients_list()
   footer()
 end
 
+---List all Gradient Names
+local function gradients_names()
+  local gradients = getGradients()
+
+  header("Gradient Names")
+  for _, gradient in ipairs(gradients) do
+    ColourTell("#FFEEEE", "", gradient["name"])
+    Note("")
+  end
+  footer()
+end
+
 ---View a specific Gradient's details
 ---@param args Token[]
 local function gradients_view(args)
@@ -1880,6 +1900,74 @@ local function gradients_print(args)
   footer()
 end
 
+---Imports a given import string.
+---@param args Token[]
+local function gradients_import(args)
+  local data
+
+  if args[1].type == "keyword" and args[1].value == "prompt" then
+    local name = utils.inputbox("Please enter an import string:", "Import!")
+
+    if type(name) ~= "string" or #name == 0 then
+      reportError("No Import String", "Whoops, looks like you didn't provide anything to import!")
+      return
+    else
+      data = trim(name)
+    end
+  else
+    data = trim(args[1].value --[[@as string]])
+  end
+
+  local imports = {}
+  local count = 0
+
+  data = data:gsub("+", "\n")
+
+  iter(data, function(import)
+    table.insert(imports, import)
+  end, "\n")
+
+  for _, import in ipairs(imports) do
+    local data = {}
+
+    iter(import, function(i) table.insert(data, i) end, "```")
+
+
+    if not data[1] or not data[2] or not data[3] or not data[4] then
+      reportError("Gradient Import Error", "Looks like you passed a bogus import string, whoops!")
+      return
+    end
+
+    local name = data[1]
+
+    local exists = getGradientByName(name)
+
+    if type(exists) ~= "nil" then
+      printUIString("[Gradients Import]-[ " .. name .. " already exists, skipping!" .. " ]")
+    else
+      local colors = {}
+      iter(data[2], function(c) table.insert(colors, Colr:new(c)) end, "|")
+      local cycles = tonumber(data[3]) --[[@as number]]
+      local reversed = data[4] == "true"
+
+      local newGradient = {
+        name = name,
+        colors = colors,
+        cycles = cycles,
+        reversed = reversed
+      }
+
+      upsertGradient(newGradient)
+      count = count + 1
+
+      printUIString("[Gradients Import]-[ " .. name .. " imported!" .. " ]")
+    end
+  end
+
+  printUIString(string.format("[Gradients Import]-[ Finished. Imported %s/%s]\n", count, #imports))
+  gradients_list()
+end
+
 ---Gradient Meta Operations
 ---@param args Token[]
 local function gradients_gradient(args)
@@ -1909,7 +1997,7 @@ local function gradients_gradient(args)
 
   if command == "new" then
     if args[2].type == "keyword" and args[2].value == "prompt" then
-      local response = utils.inputbox("Please enter the name of the gradient:", "Add New Gradient", nil, nil, nil)
+      local response = utils.inputbox("Please enter the name of the gradient:", "Add New Gradient", nil, nil, nil) --[[@as string]]
 
       if response then
         if #response == 0 then
@@ -1918,6 +2006,15 @@ local function gradients_gradient(args)
         elseif tonumber(response) then
           reportError("Name Cannot be a Number", "For annoying reasons, the name can't be a number, sorry!")
           gradients_list()
+        elseif response:match("```") then
+          -- Pasting an import string, run it as import instead.
+          gradients_import({
+            [1] = {
+              type = "string",
+              value = response
+            }
+          })
+          return
         else
           local newGradient = {
             name = response,
@@ -2122,74 +2219,6 @@ local function gradients_export(args)
   end
 end
 
----Imports a given import string.
----@param args Token[]
-local function gradients_import(args)
-  local data
-
-  if args[1].type == "keyword" and args[1].value == "prompt" then
-    local name = utils.inputbox("Please enter an import string:", "Import!")
-
-    if type(name) ~= "string" or #name == 0 then
-      reportError("No Import String", "Whoops, looks like you didn't provide anything to import!")
-      return
-    else
-      data = trim(name)
-    end
-  else
-    data = trim(args[1].value --[[@as string]])
-  end
-
-  local imports = {}
-  local count = 0
-
-  data = data:gsub("+", "\n")
-
-  iter(data, function(import)
-    table.insert(imports, import)
-  end, "\n")
-
-  for _, import in ipairs(imports) do
-    local data = {}
-
-    iter(import, function(i) table.insert(data, i) end, "```")
-
-
-    if not data[1] or not data[2] or not data[3] or not data[4] then
-      reportError("Gradient Import Error", "Looks like you passed a bogus import string, whoops!")
-      return
-    end
-
-    local name = data[1]
-
-    local exists = getGradientByName(name)
-
-    if type(exists) ~= "nil" then
-      printUIString("[Gradients Import]-[ " .. name .. " already exists, skipping!" .. " ]")
-    else
-      local colors = {}
-      iter(data[2], function(c) table.insert(colors, Colr:new(c)) end, "|")
-      local cycles = tonumber(data[3]) --[[@as number]]
-      local reversed = data[4] == "true"
-
-      local newGradient = {
-        name = name,
-        colors = colors,
-        cycles = cycles,
-        reversed = reversed
-      }
-
-      upsertGradient(newGradient)
-      count = count + 1
-
-      printUIString("[Gradients Import]-[ " .. name .. " imported!" .. " ]")
-    end
-  end
-
-  printUIString(string.format("[Gradients Import]-[ Finished. Imported %s/%s]\n", count, #imports))
-  gradients_list()
-end
-
 ---Report an export string to a given target.
 ---@param args Token[]
 local function gradients_report(args)
@@ -2289,11 +2318,16 @@ function gradients_dispatch(_, _, raw)
     report = gradients_report,
     sampler = gradients_sampler,
     send = gradients_send,
-    view = gradients_view,
+    view = gradients_view
   }
 
-  if command == "test" then
+  if command == "about" then
     gradients_about()
+    return
+  end
+
+  if command == "names" then
+    gradients_names()
     return
   end
 
